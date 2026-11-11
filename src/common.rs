@@ -1324,6 +1324,24 @@ pub fn is_public(url: &str) -> bool {
     host == "rustdesk.com" || host.ends_with(".rustdesk.com")
 }
 
+/// UDP punch, IPv6 punch and WebRTC stay off for a rendezvous server the build does not know.
+/// A server compiled into this client is one we run, with the punch ports open, so direct
+/// connection is the default there the same way it is for the public RustDesk servers.
+fn keeps_direct_connect(server: &str) -> bool {
+    if is_public(server) {
+        return true;
+    }
+    let host = server
+        .trim()
+        .trim_start_matches('[')
+        .split(|c| c == ']' || c == ':')
+        .next()
+        .unwrap_or("");
+    config::RENDEZVOUS_SERVERS
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case(host))
+}
+
 pub fn get_tcp_punch_enabled() -> bool {
     config::option2bool(
         keys::OPTION_ENABLE_TCP_PUNCH,
@@ -1358,10 +1376,8 @@ pub fn get_local_option(key: &str) -> String {
         || key == keys::OPTION_ENABLE_IPV6_PUNCH
         || key == keys::OPTION_ENABLE_WEBRTC
     {
-        if v.is_empty() {
-            if !is_public(&Config::get_rendezvous_server()) {
-                return "N".to_owned();
-            }
+        if v.is_empty() && !keeps_direct_connect(&Config::get_rendezvous_server()) {
+            return "N".to_owned();
         }
     }
     if key == "lang" && (v == "pt" || v == "br") {
@@ -3116,6 +3132,15 @@ mod tests {
         for uuid in ["", "\r\nPING\r\n", "a b", "a\0", too_long.as_str()] {
             assert!(check_relay_uuid(uuid).is_err(), "accepted {uuid:?}");
         }
+    }
+
+    #[test]
+    fn bundled_rendezvous_keeps_direct_connect() {
+        assert!(keeps_direct_connect("id.guddesk.gutekno.com"));
+        assert!(keeps_direct_connect("id.guddesk.gutekno.com:21116"));
+        assert!(keeps_direct_connect("rs-ny.rustdesk.com"));
+        assert!(!keeps_direct_connect("hbbs.example.com"));
+        assert!(!keeps_direct_connect("hbbs.example.com:21116"));
     }
 
     #[test]
